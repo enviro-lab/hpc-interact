@@ -19,7 +19,7 @@ Or just clone the repo and use `hpc_interact.py` directly.
 Instantiate a Scripter object:
 ```python
 >>> # Connect via sftp
->>> from hpc_interact import hpc_interact.Scripter
+>>> from hpc_interact import Scripter
 >>> scripter = Scripter(config="./login_config", site='somewhere.uni.edu', mode='sftp')
 >>> # NOTE: If "./login_config" doesn't exist, you'll be prompted to create it
 ```
@@ -69,5 +69,12 @@ Command preview:
 >>> 
 >>> # run it
 >>> scripter.basic_step("bash","/some/remote/directory/coolest_script_on_the_hpc.sh")
+>>> scripter.run()
+```
+
+### Started as ssh but want need to transfer files?
+```python
+>>> scripter.reset_mode("sftp")
+>>> add_some_steps(scripter)
 >>> scripter.run()
 ```

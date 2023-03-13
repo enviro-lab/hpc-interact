@@ -5,33 +5,32 @@ from pathlib import Path
 from typing import List
 from getpass import getpass
 
+def fix_quote(string):
+    """Returns `string` with double quotes converted (" -> \")"""
+    return str(string).replace('"','\\"')
+
 class Step:
     """A class to hold the expect and send commands that will be fed to `expect` on the command line
 
     Arguments:
         expect (str): the prompt to expect before acting
-        input (str): the command to send
+        cmd (str): the command to send
         mode (str, optional): how to connect to the host (options: [sftp, ssh]). Defaults to "sftp".
-        quote (str, optional): The quote symbol to use (in case the other one is part of the string). Defaults to '"'. Not fully employed everywhere. Single quotes ensure no interpolation of the command.
+        quote (str, optional): The quotation symbol to use (in case the other one is part of the string). Defaults to '"'.
     """
 
-
-    def __init__(self,expect,input,mode="sftp",quote='"') -> None:
+    def __init__(self,expect,cmd,input_quote='"',expect_quote='"') -> None:
         """Creates a step to use with `expect` 
 
         Args:
             expect (str): the prompt to expect before acting
-            input (str): the command to send
+            cmd (str): the command to send
             mode (str, optional): how to connect to the host (options: [sftp, ssh]). Defaults to "sftp".
             quote (str, optional): The quote symbol to use (in case the other one is part of the string). Defaults to '"'. Not fully employed everywhere. Single quotes ensure no interpolation of the command.
         """
-        if quote == '"':
-            self.expectation = f'expect "{expect}"'
-        else:
-            self.expectation = f"expect \\'{expect}\\'"
-        self.action = f'send "{input}\n"'
-        self.mode = mode
-        self.quote = quote
+
+        self.expectation = f'expect "{fix_quote(expect)}"'
+        self.action = f'send -- "{fix_quote(cmd)}\n"'
 
     def __repr__(self,sep="\n") -> str:
         """Prints the Step with the expect statement and action seperated by `sep`
@@ -40,7 +39,8 @@ class Step:
             sep (str): string by which to seperate each statement
         """
 
-        return f"{self.expectation}{sep}{self.action}{sep}"
+        action_fixed_quotes = self.action #.replace('"','\\"')
+        return f"{self.expectation}{sep}{action_fixed_quotes}{sep}"
 
 class Scripter:
     """A class to connect to an hpc cluster via sftp or ssh all wrapped up in a scripted batch of expect statements.
@@ -88,43 +88,79 @@ class Scripter:
             self.config=Path(config)
         else: self.config=None
         self.get_credentials(save=True,overwrite=False)
+        self.actions:List[Step] = []
+        self.__pw_steps = [
+            Step(expect="Password:", cmd=self.__password),
+            Step(expect="Passcode or option (1-3):", cmd=1)]
+        self.mode, self.expect, self.entry = self.reset_mode(mode)
+        self.open = f"expect << !\nset timeout -1\nspawn "
+        self.close = "expect eof\n!\n"
+
+    def reset_mode(self,mode,clear=True):
+        """Resets mode attributes (mode, expect, entry), and clears any actions.
+
+        Args:
+            mode (str): How you'd like to connect. Options: (sftp, ssh).
+            clear (bool): A flag to clear any steps already added. Defaults to True.
+        """
+
+        if clear and self.actions:
+            self.clear()
         self.mode = mode
         if self.mode=="sftp":
             self.expect = "sftp>"
-        else:
-            self.quote = "'"
+        else: # if self.mode=="ssh":
             self.expect = self.username
-        self.open = f"expect << !\nset timeout -1\nspawn "
         self.entry = f"{self.mode} {self.username}@{self.site}\n"
-        self.close = "expect eof\n!\n"
-        self.actions:List[Step] = []
-        self.__pw_steps = [
-            Step(expect="Password:", input=self.__password),
-            Step(expect="Passcode or option (1-3):", input=1)]
+        return self.mode, self.expect, self.entry
 
-    def add_step(self,input,expect=None):
+    def add_step(self,cmd,expect=None,input_quote='"',expect_quote='"'):
         """Adds a command to be run on the command line
         
         Args:
-            input (str): the exact command to run
+            cmd (str): the exact command to run
+            expect (str, optional): the command prompt to wait for before acting. Default determined by mode.
+            quote (str, optional): The quote symbol to use (in case the other one is part of the string). Defaults to '"'. Not fully employed everywhere. Single quotes ensure no interpolation of the command.
         """
 
         if not expect: expect = self.expect
-        step = Step(input=input,expect=expect)
+        step = Step(cmd=cmd,expect=expect,input_quote=input_quote,expect_quote=expect_quote)
         self.actions.append(step)
 
-    def basic_step(self,*commands,expect=None):
+    def basic_step(self,*commands,expect=None,input_quote='"',expect_quote='"'):
         """Adds a step by converting list of `commands` to a space-delimited string to run
         
         Args:
             *commands: ordered arguments to convert to a space-delimited string to run
-            expect (bool): 
+            expect (str, optional): the command prompt to wait for before acting. Default determined by mode.
+            quote (str, optional): The quote symbol to use (in case the other one is part of the string). Defaults to '"'. Not fully employed everywhere. Single quotes ensure no interpolation of the command.
         """
 
         if commands:
             command_str = " ".join([str(command) for command in commands if command])
-            self.add_step(command_str,expect=expect)
-    
+            self.add_step(command_str,expect=expect,input_quote=input_quote,expect_quote=expect_quote)
+
+    def insert_step(self,index,cmd,expect=None,input_quote='"',expect_quote='"'):
+        """Adds a command to be run on the command line at a given index
+
+        If `index` is greater than the current number of actions, behaves like `Scripter.add_step()`.
+        
+        Args:
+            index (int): index at which to insert step
+            cmd (str): the exact command to run
+            expect (str, optional): the command prompt to wait for before acting. Default determined by mode.
+            quote (str, optional): The quote symbol to use (in case the other one is part of the string). Defaults to '"'. Not fully employed everywhere. Single quotes ensure no interpolation of the command.
+        """
+
+        index = int(index)
+        if index > len(self.actions) or index == -1:
+            self.add_step(cmd=cmd,expect=expect,input_quote=input_quote,expect_quote=expect_quote)
+            return
+        elif index < 0: raise IndexError(f"Index should be greater than zero or -1")
+        if not expect: expect = self.expect
+        step = Step(cmd=cmd,expect=expect,input_quote=input_quote,expect_quote=expect_quote)
+        self.actions = self.actions[0:index] + [step] + self.actions[index:]
+
     def is_empty(self):
         """True if no planned actions; false if any steps already exist"""
 
@@ -142,15 +178,28 @@ class Scripter:
             step_list = self.actions
         return ''.join([step.__repr__(sep) for step in step_list])
 
+    def _add_end_step(self):
+        """Sends command to exit hpc. Prevents closing before done."""
+
+        if self.mode == "sftp": end = "quit"
+        elif self.mode == "ssh": end = "exit"
+        # add end step if end step isn't already last step
+        if not end in self.actions[-1].action:
+            self.add_step(cmd=end)
+
     def __full_command(self):
         """Gets full `expect` command to run"""
 
+        self._add_end_step()
         return self.open + self.entry + self.get_steps(self.__pw_steps) + self.get_steps() + self.close
 
     def get_actions(self):
         """Creates a generator yielding all desired actions in order"""
         for step in self.actions:
-            yield step.action.strip("").replace('send "','').replace('"','')
+            # yield step.action.strip().replace('send "','').replace('"','') # original # TODO
+            # yield step.action.strip().replace('send "','').replace('"','\\"') # new
+            # yield repr(step.action.strip().replace('send "','').replace('"','\\"')) # new
+            yield step.action.strip().replace('send "','')
     
     def preview_steps(self):
         """Prints all action steps in order to stdout"""
@@ -167,9 +216,7 @@ class Scripter:
     def run(self):
         """Runs all commands currently in self.actions"""
 
-        if self.mode == "sftp": end = "quit"
-        elif self.mode == "ssh": end = "exit"
-        self.add_step(input=end)
+        # print("CMD:",self.__full_command())
         os.system(self.__full_command())
 
     def pwd(self):
@@ -177,17 +224,28 @@ class Scripter:
 
         self.add_step("pwd")
     
-    def ls(self,dir=None):
-        """Prints contents of directory (Default: current directory) to stdout"""
+    def ls(self,dir_name=None):
+        """Prints contents of hpc directory (Default: current directory) to stdout"""
 
-        if not dir: dir = "."
-        self.basic_step("ls -la",dir)
-    
-    def cwd(self,dir,local=False):
+        if not dir_name: dir_name = "."
+        self.basic_step("ls -la",dir_name)
+
+    def mkdir(self,dir_name,local):
         """Changes working directory to `dir`
         
         Args:
-            dir (str | Path): directory to change to
+            dir_name (str | Path): directory to change to
+            local (bool): A flag indicating to change local working directory (not remote)
+        """
+
+        l = "l" if local else ""
+        self.add_step(f"{l}mkdir {dir_name}")
+    
+    def cwd(self,dir_name,local=False):
+        """Changes working directory to `dir`
+        
+        Args:
+            dir_name (str | Path): directory to change to
             local (bool): A flag indicating to change local working directory (not remote)
         """
 
@@ -197,7 +255,7 @@ class Scripter:
             else:
                 raise Exception("lcd only works with sftp")
         else: cd = "cd" 
-        self.basic_step(cd,dir)
+        self.basic_step(cd,dir_name)
 
     def set_permissions(self,files,group:str=None,octal:str="0664"):
         """WARNING: Test before use
@@ -229,21 +287,55 @@ class Scripter:
             if self.group:
                 self.basic_step("chgrp",self.group,file)
 
+    def directory_transfer_check(self,file):
+        """Returns True if it looks like a directory is being transferred
+
+        Args:
+            file (str | Path): name of file(s) to transfer
+        """
+
+        return "*" in Path(file).name
+
     def transfer(self,trans_type,file,outdir=None,local=False,new_name=None,options:list=[]):
-        """Transfer file to/from outdir over sftp
+        """Transfer file to/from outdir over sftp,
+
+        Only transfer files, not directories. To move all files in a directory, use `file="directory/*"`
         
         Args:
             trans_type (str): command to use (options: [get, put])
             file (str | Path): path to file to transfer
-            outdir (str | Path): directory where file will end up
+            outdir (str | Path): directory where transferred file(s) will live
             local (bool): a flag to indicate that the transferred file is moving to a local destination
-            new_name (str): if provided, `file` will be renamed to `outdir`/`new_name`
+            new_name (str): name of transferred file (or directory if transferring multiple files). If not provided, `new_name` will be set to `outdir`/`file`.
             options (list): options to apply to the `get` or `set` command
         """
 
-        if self.mode != "sftp":
-            raise Exception(f"'{trans_type}' can only be used with mode='sftp'")
-        if outdir: self.cwd(dir=outdir,local=local)
+        # only allow transfers via sftp
+        if self.mode != "sftp": raise Exception(f"'{trans_type}' can only be used with mode='sftp'")
+        globbed_directory = self.directory_transfer_check(file)
+        # determine name of outfile/new_file, if not provided
+        if globbed_directory:
+            if outdir:
+                temp = Path(outdir)
+                if not new_name:
+                    new_name = temp.name + "/"
+                    outdir = temp.parent
+            else:
+                if not new_name:
+                    # ignore the glob pattern in file.name
+                    new_name = Path(file).parent.name + "/"
+            # attempt to make `new_name` directory if it looks like we're transferring a directory's contents
+            self.mkdir(new_name,local=local)
+        else:
+            if new_name == None:
+                new_name = Path(file).name
+        # go to `outdir` where `newfile` (file or directory) will live (or else assume cwd is outdir)
+        if outdir:
+            self.cwd(dir_name=outdir,local=local)
+
+        # TEMP: TODO remove
+        self.add_step("pwd")
+        # add transfer step
         if options:
             opt="-"+"".join(options)
             self.basic_step(trans_type,opt,file,new_name,"\n")
@@ -251,29 +343,37 @@ class Scripter:
             self.basic_step(trans_type,file,new_name,"\n")
 
     def get(self,file,outdir=None,new_name=None,options:list=[]):
-        """Downloads file to current local directory or specified local outdir
+        """Downloads file to current local directory or specified local outdir,
+
+        Only transfer files, not directories. To move all files in a directory, use `directory/*`
         
         Each `get` consists of 2 steps:
-            `cd "${outdir}"`
-            `get "${file}" "${new_name}"`
+            If outdir is provided:
+                `cd "${outdir}"`
+            Regardless:
+                `get "${file}" "${new_name}"`
 
         Args:
             file (str | Path): file to transfer
             outdir (str | Path): directory where file will end up
             new_name (str): If provided, `file` will be renamed to `outdir`/`new_name`
             options (list): options to apply to the `get` command
+            is_dir (bool): A flag to indicate that `file` is a directory
         """
 
         self.transfer("get",file,outdir,local=True,new_name=new_name,options=options)
 
     def put(self,file,outdir=None,new_name=None,options:list=[],set_permissions=False):
-        """Uploads file to current remote directory or specified remote outdir
+        """Uploads file to current remote directory or specified remote outdir,
+
+        Only transfer files, not directories. To move all files in a directory, use `directory/*`
         
-        Each `put` starts by `cd`-ing to `outdir` followed by a simple `put` command
         Each `put` consists of 3 main steps:
-            `mkdir ${outdir}`
-            `cd "${outdir}"`
-            `get "${file}" "${new_name}"`
+            If outdir is provided:
+                `mkdir ${outdir};`
+                `cd "${outdir}";`
+            Regardless:
+                `get "${file}" "${new_name}";`
             ``
         Args:
             file (str | Path): file to transfer
@@ -281,6 +381,7 @@ class Scripter:
             new_name (str): If provided, `file` will be renamed to `outdir`/`new_name`
             options (list): options to apply to the `set` command
             set_permissions (bool): A flag indicating to include permission changing steps
+            is_dir (bool): A flag to indicate that `file` is a directory
         """
 
         if outdir:
