@@ -6,10 +6,11 @@ authors = ["Sam Kunkleman <skunklem@uncc.edu>"]
 license = "MIT"
 readme = "README.md"
 packages = [{include = "hpc_interact"}]
+repository = "https://github.com/enviro-lab/hpc-interact.git"
+keywords = ["gisaid","download","sequences","select","EPI_SET","epicov"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
-
 
 [build-system]
 requires = ["poetry-core"]
