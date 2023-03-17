@@ -62,7 +62,7 @@ class Scripter:
         site_type (str, optional): What you'll be interacting with: [hpc, ncbi]. Defaults to "hpc".
     """
 
-    def __init__(self,username=None,password=None,site=None,mode="sftp",group=None,config=None,site_type="hpc"):
+    def __init__(self,username=None,password=None,site=None,mode="sftp",group=None,config=None,save_credentials=True,site_type="hpc"):
         """Creates a Scripter instance
 
         Args:
@@ -87,7 +87,8 @@ class Scripter:
         if config:
             self.config=Path(config)
         else: self.config=None
-        self.get_credentials(save=True,overwrite=False)
+        self.save_credentials = save_credentials
+        self.get_credentials(save=save_credentials,overwrite=False)
         self.actions:List[Step] = []
         self.__pw_steps = [
             Step(expect="Password:", cmd=self.__password),
@@ -487,7 +488,7 @@ class Scripter:
         if not self.username or not self.__password:
             if self.config.exists():
                 self.read_credentials(self.config)
-                self.get_credentials() # verify that username/password were found
+                self.get_credentials(save=save) # verify that username/password were found
             else:
                 if headless == True:
                     print(f"Config file '{self.config}' is missing variables\n"

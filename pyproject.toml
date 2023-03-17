@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "hpc-interact"
-version = "0.1.0"
+version = "0.1.1"
 description = "Used for file transfer and sending predefined commands to an hpc cluster"
 authors = ["Sam Kunkleman <skunklem@uncc.edu>"]
 license = "MIT"
 readme = "README.md"
 packages = [{include = "hpc_interact"}]
 repository = "https://github.com/enviro-lab/hpc-interact.git"
-keywords = ["gisaid","download","sequences","select","EPI_SET","epicov"]
+keywords = ["upload","download","sftp","ssh","expect","file transfer"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
